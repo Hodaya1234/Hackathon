@@ -6,6 +6,10 @@ from data_set import DataSet
 from torch.utils import data as torch_data
 
 
+device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+print(device)
+
+
 def train_net(train_x, train_y, test_x, test_y):
     [_, _, n_freq, n_times] = train_x.shape
     n_classes = len(np.unique(train_y))
@@ -14,14 +18,16 @@ def train_net(train_x, train_y, test_x, test_y):
     train_loader = torch_data.DataLoader(train_data_set, batch_size=32, shuffle=True)
 
     test_data_set = DataSet(test_x, test_y)
+    test_x = test_data_set.all_x.to(device)
+    test_y = test_data_set.all_y.to(device)
     # test_loader = torch_data.DataLoader(test_data_set)
 
-    model = ConvNet(n_freq, n_times, n_classes).double()
+    model = ConvNet(n_freq, n_times, n_classes).double().to(device)
 
     # Loss and optimizer
     criterion = nn.CrossEntropyLoss()
     optimizer = torch.optim.Adam(model.parameters(), lr=0.0001)
-    num_epochs = 100
+    num_epochs = 10
 
     total_step = len(train_loader)
     train_loss = []
@@ -36,6 +42,8 @@ def train_net(train_x, train_y, test_x, test_y):
         epoch_loss = []
         epoch_acc = []
         for i, (images, labels) in enumerate(train_loader):
+            images = images.to(device)
+            labels = labels.to(device)
             # Run the forward pass
             optimizer.zero_grad()
             outputs = model(images)
@@ -58,54 +66,25 @@ def train_net(train_x, train_y, test_x, test_y):
         train_acc.append(np.mean(epoch_acc))
         model.eval()
         with torch.no_grad():
-            outputs = model(test_data_set.all_x)
-            loss = criterion(outputs, test_data_set.all_y)
+            outputs = model(test_x)
+            loss = criterion(outputs, test_y)
             test_loss.append(loss.item())
-            total = test_data_set.all_y.size(0)
+            total = test_y.size(0)
             _, predicted = torch.max(outputs.data, 1)
-            correct = (predicted == test_data_set.all_y).sum().item()
+            correct = (predicted == test_y).sum().item()
             acc = correct / total
             test_acc.append(acc)
             if acc > best_acc:
-                model.save_state_dict('best_model.pt')
+                print(acc)
+                torch.save(model.state_dict(), 'best_model.pth')
                 best_acc = acc
 
 
-def normalize_data(train_x, train_y, test_x, test_y):
-    m = np.mean(train_x, axis=0)
-    s = np.std(train_x, axis=0)
-    train_x = np.divide(np.subtract(train_x, m), s)
-    test_x = np.divide(np.subtract(test_x, m), s)
+data = np.load('Data.npz')
+train_x = data['train_x']
+train_y = data['train_y']
+test_x = data['test_x']
+test_y = data['test_y']
 
-    [n_train, n_freq, n_times] = train_x.shape
-
-    new_n_freq = int(np.ceil((n_freq - 6) / 4)) * 4 + 6
-    new_n_times = int(np.ceil((n_times - 6) / 4)) * 4 + 6
-
-    n_classes = len(np.unique(train_y))
-
-    zero_train = np.zeros([n_train, new_n_freq, new_n_times])
-    zero_test = np.zeros([test_x.shape[0], new_n_freq, new_n_times])
-    zero_train[:, :n_freq, :n_times] = train_x
-    zero_test[:, :n_freq, :n_times] = test_x
-
-    train_x = zero_train[:, np.newaxis, :, :]
-    test_x = zero_test[:, np.newaxis, :, :]
-
-    indices = np.random.choice(len(test_y), 400)
-    test_x = test_x[indices, :, :]
-    test_y = test_y[indices]
-
-    np.savez('Data', x_train=train_x, y_train=train_y, x_test=test_x, y_test=test_y)
-    return train_x, train_y, test_x, test_y
-
-
-data = np.load('Data_spec.npz')
-train_x = data['x_train']
-train_y = data['y_train']
-test_x = data['x_test']
-test_y = data['y_test']
-
-# normalize_data(train_x, train_y, test_x, test_y)
 
 train_net(train_x, train_y, test_x, test_y)
